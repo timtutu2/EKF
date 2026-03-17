@@ -1,2 +1,4 @@
 __pycache__/
 /Feature_detection_match/dataset02_features.npy
+*.png
+*.npy
