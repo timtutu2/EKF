@@ -1,7 +1,6 @@
 """
 Landmark Mapping via EKF Update
 ================================
-ECE 276A - Project 3, Part 3
 
 Assumes the IMU trajectory from Part 1 (ekf_imu_prediction) is correct (given).
 Estimates the 3D world-frame positions  m_j ∈ R^3  of M visual landmarks observed

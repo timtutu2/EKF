@@ -26,7 +26,7 @@ DATASET_DIR  = "/home/tim/Desktop/UCSD/ECE276A/PR3/dataset02"
 IMGS_FILE    = os.path.join(DATASET_DIR, "dataset02_imgs.npy")
 DATA_FILE    = os.path.join(DATASET_DIR, "dataset02.npy")
 OUT_NPY      = os.path.join(os.path.dirname(__file__), "dataset02_features.npy")
-OUT_PNG      = os.path.join(os.path.dirname(__file__), "dataset02_features.png")
+OUT_PNG      = os.path.join(os.path.dirname(__file__), "dataset02_features_correspond.png")
 
 # ── Optional: process only a prefix of frames for a quick test ────────────────
 #   Set to None to process all 6393 frames.

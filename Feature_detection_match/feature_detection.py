@@ -1,6 +1,4 @@
 """
-Feature Detection and Matching for dataset02 (ECE276A PR3, Question 2)
-
 (a) Stereo matching: detect Shi-Tomasi corners in left image, find
     correspondences in right image by searching along the epipolar line
     using normalized cross-correlation (NCC / matchTemplate).  Pure LK is

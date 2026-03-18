@@ -1,7 +1,5 @@
 """
 IMU Localization via EKF Prediction
-====================================
-ECE 276A - Project 3, Part 1
 
 This module implements an EKF prediction step for IMU localization using
 SE(3) kinematics equations. The robot pose T_t ∈ SE(3) is propagated forward
@@ -90,19 +88,19 @@ def ekf_imu_prediction(v_t: np.ndarray,
     # Tuned values: small but non-zero to model IMU noise.
     # Translational noise σ_v ≈ 0.01 m/s  →  σ_v^2 ≈ 1e-4
     # Rotational noise    σ_ω ≈ 0.01 rad/s →  σ_ω^2 ≈ 1e-4
+    a=1e-4
     if W_noise is None:
-        W_noise = np.diag([1e-4, 1e-4, 1e-4,   # translational
-                           1e-4, 1e-4, 1e-4])   # rotational
+        W_noise = np.diag([a, a, a,   # translational
+                            a, a, a])   # rotational
 
-    # --- Allocate storage ---------------------------------------------------
     world_T_imu = np.zeros((N, 4, 4))
     Sigma       = np.zeros((N, 6, 6))
 
-    # --- Initial conditions -------------------------------------------------
+    #Initial conditions
     world_T_imu[0] = np.eye(4)     # World frame coincides with IMU at t=0
     Sigma[0]       = np.zeros((6, 6))  # Initial pose perfectly known
 
-    # --- Prediction loop ----------------------------------------------------
+    #Prediction loop
     for t in range(N - 1):
         # Time step duration
         dt = timestamps[t + 1] - timestamps[t]
@@ -120,7 +118,7 @@ def ekf_imu_prediction(v_t: np.ndarray,
         Phi_t = twist2pose(twist_mat)              # shape (4, 4)
 
         # ---- Mean update -----------------------------------------------
-        # T̄_{t+1} = T̄_t · Φ_t
+        # T_{t+1} = T_t · Φ_t
         world_T_imu[t + 1] = world_T_imu[t] @ Phi_t
 
         # ---- Covariance update -----------------------------------------
@@ -165,11 +163,11 @@ if __name__ == '__main__':
             continue
 
         # Load data
-        v_t, w_t, timestamps, features, K_l, K_r, extL_T_imu, extR_T_imu = \
+        v_t, w_t, timestamps, _, K_l, K_r, extL_T_imu, extR_T_imu = \
             load_data(data_path)
-
+        
         N = timestamps.shape[0]
-        duration = timestamps[-1] - timestamps[0]
+        duration = timestamps[-1] - timestamps[0] #last -first  
         avg_dt = duration / (N - 1)
 
         print(f"  Timesteps : {N}")
