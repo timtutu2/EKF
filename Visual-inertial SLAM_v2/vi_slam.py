@@ -17,6 +17,13 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pr3_utils import axangle2twist, inversePose, pose2adpose, twist2pose
+
+# Rotation from the "regular" camera frame (same axes as IMU: x=fwd, y=left, z=up)
+# to the optical camera frame (x=right, y=down, z=fwd) used by the K matrix.
+_oTr = np.array([[0., -1.,  0., 0.],
+                 [0.,  0., -1., 0.],
+                 [1.,  0.,  0., 0.],
+                 [0.,  0.,  0., 1.]])
 from Landmark_mapping_EKF_update.landmark_mapping_ekf import (
     jacobians_batch,
     observations_batch,
@@ -69,12 +76,16 @@ def pose_jacobians_batch(
     m_h = np.hstack([m_batch, np.ones((m_batch.shape[0], 1))])
     q_imu = (T_imu_world @ m_h.T).T
 
-    p_L = (extL_T_imu @ q_imu.T).T
-    p_R = (extR_T_imu @ q_imu.T).T
+    # IMU → optical camera transforms
+    oT_L = _oTr @ inversePose(extL_T_imu)
+    oT_R = _oTr @ inversePose(extR_T_imu)
+
+    p_L = (oT_L @ q_imu.T).T
+    p_R = (oT_R @ q_imu.T).T
 
     Q = odot_operator_batch(q_imu)
-    dp_L = -np.einsum("ij,kjl->kil", extL_T_imu, Q)
-    dp_R = -np.einsum("ij,kjl->kil", extR_T_imu, Q)
+    dp_L = -np.einsum("ij,kjl->kil", oT_L, Q)
+    dp_R = -np.einsum("ij,kjl->kil", oT_R, Q)
 
     H = np.zeros((m_batch.shape[0], 4, 6), dtype=m_batch.dtype)
 
@@ -168,6 +179,10 @@ def vi_slam_ekf(
         print(f"  Total landmarks: {M}")
         print(f"  Landmarks kept after min-observation filter: {keep_lm.sum()}")
 
+    # Pre-compute IMU→optical-camera transforms (fixed calibration, not time-varying)
+    oT_L = _oTr @ inversePose(extL_T_imu)   # IMU → optical left-cam  (4, 4)
+    oT_R = _oTr @ inversePose(extR_T_imu)   # IMU → optical right-cam (4, 4)
+
     for t in range(N):
         if t > 0:
             dt = timestamps[t] - timestamps[t - 1]
@@ -179,8 +194,8 @@ def vi_slam_ekf(
             Sigma_T = _symmetrize(F_t @ Sigma_T @ F_t.T + W_noise)
 
         T_imu_world = inversePose(world_T_imu[t])
-        T_cam_L = extL_T_imu @ T_imu_world
-        T_cam_R = extR_T_imu @ T_imu_world
+        T_cam_L = oT_L @ T_imu_world                        # world → optical left cam
+        T_cam_R = oT_R @ T_imu_world                        # world → optical right cam
         P_L = K_l @ T_cam_L[:3, :]
         P_R = K_r @ T_cam_R[:3, :]
 
@@ -316,8 +331,8 @@ def vi_slam_ekf(
         world_T_imu[t] = world_T_imu[t] @ twist2pose(axangle2twist(dxi))
 
         T_imu_world = inversePose(world_T_imu[t])
-        T_cam_L = extL_T_imu @ T_imu_world
-        T_cam_R = extR_T_imu @ T_imu_world
+        T_cam_L = oT_L @ T_imu_world                        # world → optical left cam
+        T_cam_R = oT_R @ T_imu_world                        # world → optical right cam
 
         z_hat_corr, valid_corr = observations_batch(m_batch, T_cam_L, T_cam_R, K_l, K_r)
         if not np.any(valid_corr):

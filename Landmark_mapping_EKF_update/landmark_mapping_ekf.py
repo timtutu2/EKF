@@ -17,8 +17,12 @@ Stereo Observation Model for landmark j at time t:
 
     where T_t = world_T_imu[t] is the known IMU pose and:
 
-        p_L = extL_T_imu @ inv(T_t) @ [m_j; 1]   (landmark in left-cam frame)
-        p_R = extR_T_imu @ inv(T_t) @ [m_j; 1]   (landmark in right-cam frame)
+    extL_T_imu (= _IT_L) maps points FROM the left regular camera frame
+    (same orientation as IMU: x=fwd, y=left, z=up) TO the IMU frame.
+    oTr converts from the regular frame to the optical frame (x=right, y=down, z=fwd).
+
+        p_L = oTr @ inv(extL_T_imu) @ inv(T_t) @ [m_j; 1]   (in optical left-cam frame)
+        p_R = oTr @ inv(extR_T_imu) @ inv(T_t) @ [m_j; 1]   (in optical right-cam frame)
 
         h(m_j; T_t) = [ fu_l · p_L[0]/p_L[2] + cu_l,
                          fv_l · p_L[1]/p_L[2] + cv_l,
@@ -26,7 +30,7 @@ Stereo Observation Model for landmark j at time t:
                          fv_r · p_R[1]/p_R[2] + cv_r ]
 
 Observation Jacobian  H_j = ∂h/∂m_j  (4×3):
-    Let A_L = extL_T_imu @ T_imu_world,  A_R = extR_T_imu @ T_imu_world
+    Let A_L = oTr @ inv(extL_T_imu) @ T_imu_world,  A_R = oTr @ inv(extR_T_imu) @ T_imu_world
         p_L = A_L @ [m_j; 1],  p_R = A_R @ [m_j; 1]
 
     ∂h_L / ∂p_L  (2×4):
@@ -56,6 +60,13 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from pr3_utils import inversePose
 
+# Rotation from the "regular" camera frame (same axes as IMU: x=fwd, y=left, z=up)
+# to the optical camera frame (x=right, y=down, z=fwd) used by the K matrix.
+_oTr = np.array([[0., -1.,  0., 0.],
+                 [0.,  0., -1., 0.],
+                 [1.,  0.,  0., 0.],
+                 [0.,  0.,  0., 1.]])
+
 
 # ---------------------------------------------------------------------------
 # DLT Stereo Triangulation (batch)
@@ -73,8 +84,8 @@ def triangulate_batch(lx, ly, rx, ry, P_L, P_R):
     ----------
     lx, ly  : (K,) float  left-image pixel coordinates
     rx, ry  : (K,) float  right-image pixel coordinates
-    P_L     : (3, 4)      left  projection matrix  = K_l @ extL_T_imu @ T_imu_world
-    P_R     : (3, 4)      right projection matrix  = K_r @ extR_T_imu @ T_imu_world
+    P_L     : (3, 4)      left  projection matrix  = K_l @ oTr @ inv(extL_T_imu) @ T_imu_world
+    P_R     : (3, 4)      right projection matrix  = K_r @ oTr @ inv(extR_T_imu) @ T_imu_world
 
     Returns
     -------
@@ -117,8 +128,8 @@ def observations_batch(m_batch, T_cam_L, T_cam_R, K_l, K_r):
     Parameters
     ----------
     m_batch  : (K, 3)  landmark world-frame positions
-    T_cam_L  : (4, 4)  world → left-camera  transform = extL_T_imu @ T_imu_world
-    T_cam_R  : (4, 4)  world → right-camera transform = extR_T_imu @ T_imu_world
+    T_cam_L  : (4, 4)  world → optical left-camera  transform = oTr @ inv(extL_T_imu) @ T_imu_world
+    T_cam_R  : (4, 4)  world → optical right-camera transform = oTr @ inv(extR_T_imu) @ T_imu_world
     K_l, K_r : (3, 3)  camera intrinsic matrices
 
     Returns
@@ -155,8 +166,8 @@ def jacobians_batch(m_batch, T_cam_L, T_cam_R, K_l, K_r):
     Parameters
     ----------
     m_batch  : (K, 3)  landmark world-frame positions
-    T_cam_L  : (4, 4)  world → left-camera  transform
-    T_cam_R  : (4, 4)  world → right-camera transform
+    T_cam_L  : (4, 4)  world → optical left-camera  transform
+    T_cam_R  : (4, 4)  world → optical right-camera transform
     K_l, K_r : (3, 3)  camera intrinsics
 
     Returns
@@ -228,8 +239,8 @@ def ekf_landmark_mapping(
     features         : (4, M, N)   Stereo observations [lx,ly,rx,ry] × M × N
                                    Invalid observations are set to -1.
     K_l, K_r         : (3, 3)      Left / right camera intrinsic matrices
-    extL_T_imu       : (4, 4)      SE(3) transform: IMU → left camera frame
-    extR_T_imu       : (4, 4)      SE(3) transform: IMU → right camera frame
+    extL_T_imu       : (4, 4)      SE(3) transform: left camera regular frame → IMU (_IT_L)
+    extR_T_imu       : (4, 4)      SE(3) transform: right camera regular frame → IMU (_IT_R)
     V_noise          : (4, 4)      Pixel observation noise covariance.
                                    Default: 4·I₄  (σ = 2 px per coordinate)
     sigma_init       : float        Initial landmark position std dev [m].
@@ -279,13 +290,19 @@ def ekf_landmark_mapping(
     # Pre-compute all inverse IMU poses once  (N, 4, 4)
     T_imu_world_all = inversePose(world_T_imu)
 
+    # oTr @ inv(extL/R_T_imu): maps from IMU frame to optical camera frame.
+    # extL_T_imu = _IT_L maps from left-cam regular frame to IMU, so its
+    # inverse maps from IMU to left-cam regular, and oTr converts regular→optical.
+    oT_L = _oTr @ inversePose(extL_T_imu)   # IMU → optical left-cam  (4, 4)
+    oT_R = _oTr @ inversePose(extR_T_imu)   # IMU → optical right-cam (4, 4)
+
     # -----------------------------------------------------------------------
     # Main EKF loop over timesteps
     # -----------------------------------------------------------------------
     for t in range(N):
         T_imu_world = T_imu_world_all[t]                    # (4, 4)
-        T_cam_L     = extL_T_imu @ T_imu_world              # (4, 4)  world→left cam
-        T_cam_R     = extR_T_imu @ T_imu_world              # (4, 4)  world→right cam
+        T_cam_L     = oT_L @ T_imu_world                    # (4, 4)  world→optical left cam
+        T_cam_R     = oT_R @ T_imu_world                    # (4, 4)  world→optical right cam
 
         # Projection matrices for DLT triangulation  (3, 4)
         P_L = K_l @ T_cam_L[:3, :]

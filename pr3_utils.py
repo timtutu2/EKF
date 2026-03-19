@@ -20,9 +20,10 @@ def load_data(file_name: str):
             with shape 3*3
         K_r: right camera intrinsic matrix
             with shape 3*3
-        extL_T_imu: extrinsic transformation from imu frame to left camera, in SE(3).
+        extL_T_imu: SE(3) transform from left camera regular frame to IMU frame (_IT_L).
+            The regular camera frame shares orientation with the IMU (x=fwd, y=left, z=up).
             with shape 4*4
-        extL_T_imu: extrinsic transformation from imu frame to right camera, in SE(3).
+        extR_T_imu: SE(3) transform from right camera regular frame to IMU frame (_IT_R).
             with shape 4*4
     '''
     data = np.load(file_name, allow_pickle = True).item()
@@ -32,8 +33,8 @@ def load_data(file_name: str):
     features = data["features"] # 4 x num_features x t : pixel coordinates of the visual features
     K_l = data["K_l"] # intrinsic calibration matrix of left camera
     K_r = data["K_r"] # intrinsic calibration matrix of right camera
-    extL_T_imu = data["extL_T_imu"] # transformation from imu frame to left camera frame
-    extR_T_imu = data["extR_T_imu"] # transformation from imu frame to right camera frame
+    extL_T_imu = data["extL_T_imu"] # SE(3): left camera regular frame → IMU frame (_IT_L)
+    extR_T_imu = data["extR_T_imu"] # SE(3): right camera regular frame → IMU frame (_IT_R)
     
     return v_t, w_t, timestamps, features, K_l, K_r, extL_T_imu, extR_T_imu
 

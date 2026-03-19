@@ -38,16 +38,20 @@ Pose Jacobian  H_T_j  (4×6):
     Under right-perturbation  T_t = T̄_t · exp(ξ̂):
         T_imu_world(ξ) = exp(-ξ̂) · T̄_imu_world
 
+    extL_T_imu (= _IT_L) maps FROM the left regular-camera frame TO the IMU frame.
+    Let oTr be the regular→optical rotation, and let:
+        oT_L = oTr @ inv(extL_T_imu)   (IMU → optical left camera)
+
     Let q_imu = T̄_imu_world · m_h   (landmark in IMU frame).
-    Then ∂p_L/∂ξ = -extL_T_imu · q⊙   where q⊙ is the 4×6 "odot" operator:
+    Then ∂p_L/∂ξ = -oT_L · q⊙   where q⊙ is the 4×6 "odot" operator:
 
         q⊙ = [[q4,  0,  0,   0,  q3, -q2],
                [ 0, q4,  0, -q3,   0,  q1],
                [ 0,  0, q4,  q2, -q1,   0],
                [ 0,  0,  0,   0,   0,   0]]
 
-    H_T[:2, :] = (∂z_L/∂p_L) · (-extL_T_imu · q⊙)
-    H_T[2:, :] = (∂z_R/∂p_R) · (-extR_T_imu · q⊙)
+    H_T[:2, :] = (∂z_L/∂p_L) · (-oT_L · q⊙)
+    H_T[2:, :] = (∂z_R/∂p_R) · (-oT_R · q⊙)
 """
 
 import os
@@ -62,6 +66,13 @@ from pr3_utils import (
     pose2adpose,
     inversePose,
 )
+
+# Rotation from the "regular" camera frame (same axes as IMU: x=fwd, y=left, z=up)
+# to the optical camera frame (x=right, y=down, z=fwd) used by the K matrix.
+_oTr = np.array([[0., -1.,  0., 0.],
+                 [0.,  0., -1., 0.],
+                 [1.,  0.,  0., 0.],
+                 [0.,  0.,  0., 1.]])
 from Landmark_mapping_EKF_update.landmark_mapping_ekf import (
     triangulate_batch,
     observations_batch,
@@ -129,8 +140,8 @@ def pose_jacobians_batch(
     ----------
     m_batch     : (K, 3)  landmark world-frame positions
     T_imu_world : (4, 4)  current estimate of world → IMU transform
-    extL_T_imu  : (4, 4)  IMU → left camera
-    extR_T_imu  : (4, 4)  IMU → right camera
+    extL_T_imu  : (4, 4)  left camera regular frame → IMU  (_IT_L)
+    extR_T_imu  : (4, 4)  right camera regular frame → IMU (_IT_R)
     K_l, K_r    : (3, 3)  camera intrinsics
 
     Returns
@@ -143,16 +154,20 @@ def pose_jacobians_batch(
     # Landmark in IMU frame:  q_imu = T̄_imu_world · m_h
     q_imu = (T_imu_world @ m_h.T).T               # (K, 4)
 
-    # Landmark in camera frames (for projection Jacobians)
-    p_L = (extL_T_imu @ q_imu.T).T                # (K, 4)
-    p_R = (extR_T_imu @ q_imu.T).T                # (K, 4)
+    # IMU → optical camera transforms  (using _oTr and inverse of the stored extrinsics)
+    oT_L = _oTr @ inversePose(extL_T_imu)   # (4, 4)
+    oT_R = _oTr @ inversePose(extR_T_imu)   # (4, 4)
+
+    # Landmark in optical camera frames (for projection Jacobians)
+    p_L = (oT_L @ q_imu.T).T                      # (K, 4)
+    p_R = (oT_R @ q_imu.T).T                      # (K, 4)
 
     # Odot operator  Q = q_imu⊙  (K, 4, 6)
     Q = odot_operator_batch(q_imu)
 
-    # ∂p_L/∂ξ = -extL_T_imu · Q  →  einsum over intrinsic (4,4)×(K,4,6)
-    dp_L = -np.einsum('ij,kjl->kil', extL_T_imu, Q)  # (K, 4, 6)
-    dp_R = -np.einsum('ij,kjl->kil', extR_T_imu, Q)  # (K, 4, 6)
+    # ∂p_L/∂ξ = -oT_L · Q
+    dp_L = -np.einsum('ij,kjl->kil', oT_L, Q)     # (K, 4, 6)
+    dp_R = -np.einsum('ij,kjl->kil', oT_R, Q)     # (K, 4, 6)
 
     # ∂z_L/∂p_L  (K, 2, 4)
     dz_L = np.zeros((K, 2, 4))
@@ -216,8 +231,8 @@ def vi_slam_ekf(
     timestamps   : (N,)    UNIX timestamps [s]
     features     : (4, M, N)  stereo pixel observations; -1 for missing
     K_l, K_r     : (3, 3)  camera intrinsics
-    extL_T_imu   : (4, 4)  IMU → left camera
-    extR_T_imu   : (4, 4)  IMU → right camera
+    extL_T_imu   : (4, 4)  left camera regular frame → IMU  (_IT_L)
+    extR_T_imu   : (4, 4)  right camera regular frame → IMU (_IT_R)
     W_noise      : (6, 6)  IMU process noise covariance
     V_noise      : (4, 4)  stereo observation noise covariance
     sigma_init   : float   initial landmark position std dev [m]
@@ -265,6 +280,10 @@ def vi_slam_ekf(
     Sigma_lm    = np.tile(Sigma0, (M, 1, 1))
     initialized = np.zeros(M, dtype=bool)
 
+    # Pre-compute IMU→optical-camera transforms (fixed calibration, not time-varying)
+    oT_L = _oTr @ inversePose(extL_T_imu)   # IMU → optical left-cam  (4, 4)
+    oT_R = _oTr @ inversePose(extR_T_imu)   # IMU → optical right-cam (4, 4)
+
     # ---- Main loop -------------------------------------------------------
     for t in range(N):
 
@@ -283,8 +302,8 @@ def vi_slam_ekf(
 
         # Camera transforms for this timestep
         T_imu_world = inversePose(world_T_imu[t])
-        T_cam_L     = extL_T_imu @ T_imu_world
-        T_cam_R     = extR_T_imu @ T_imu_world
+        T_cam_L     = oT_L @ T_imu_world                    # world → optical left cam
+        T_cam_R     = oT_R @ T_imu_world                    # world → optical right cam
         P_L         = K_l @ T_cam_L[:3, :]
         P_R         = K_r @ T_cam_R[:3, :]
 
@@ -458,8 +477,8 @@ def vi_slam_ekf(
         # Step 3b: Landmark update (standard EKF, Joseph form, updated pose)
         # ------------------------------------------------------------------
         T_imu_world = inversePose(world_T_imu[t])
-        T_cam_L     = extL_T_imu @ T_imu_world
-        T_cam_R     = extR_T_imu @ T_imu_world
+        T_cam_L     = oT_L @ T_imu_world                    # world → optical left cam
+        T_cam_R     = oT_R @ T_imu_world                    # world → optical right cam
 
         # Re-project with corrected pose
         z_hat_new, valid_new = observations_batch(m_v, T_cam_L, T_cam_R, K_l, K_r)
