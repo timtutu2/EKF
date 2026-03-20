@@ -216,24 +216,24 @@ def process_dataset(name: str, data_path: str):
 
     # --- Save results ------------------------------------------------------
     result_path = os.path.join(BASE_DIR, f'{name}_vi_slam_{VI_SLAM_PARAMS["lm_grid"]}.npy')
-    np.save(result_path, {
-        'world_T_imu':  world_T_imu_slam,
-        'landmarks':    landmarks,
-        'Sigma_lm':     Sigma_lm,
-        'initialized':  initialized,
-    })
+    # np.save(result_path, {
+    #     'world_T_imu':  world_T_imu_slam,
+    #     'landmarks':    landmarks,
+    #     'Sigma_lm':     Sigma_lm,
+    #     'initialized':  initialized,
+    # })
     print(f"\n  Saved results : {result_path}")
 
     # --- Plots -------------------------------------------------------------
     # Main plot: VI-SLAM trajectory + landmark map
-    fig1_path = os.path.join(BASE_DIR, f'{name}_vi_slam_{VI_SLAM_PARAMS["lm_grid"]}.png')
+    fig1_path = os.path.join(BASE_DIR, f'{name}_vi_slam_{VI_SLAM_PARAMS["lm_grid"]}_dt_0.png')
     fig1, _ = plot_vi_slam_results(
         world_T_imu_slam, world_T_imu_imu,
         landmarks, initialized, name, fig1_path,
     )
 
     # Comparison plot: IMU-only vs VI-SLAM side by side
-    fig2_path = os.path.join(BASE_DIR, f'{name}_trajectory_comparison_{VI_SLAM_PARAMS["lm_grid"]}.png')
+    fig2_path = os.path.join(BASE_DIR, f'{name}_trajectory_comparison_{VI_SLAM_PARAMS["lm_grid"]}_dt_0.png')
     plot_trajectory_comparison(
         world_T_imu_slam, world_T_imu_imu, name, fig2_path,
     )

@@ -308,7 +308,7 @@ def vi_slam_ekf(
             world_T_imu[t] = world_T_imu[t - 1] @ Phi_t
 
             F_t    = pose2adpose(inversePose(Phi_t))         # Ad(Φ^{-1})
-            Sigma_T = F_t @ Sigma_T @ F_t.T + W_noise
+            Sigma_T = F_t @ Sigma_T @ F_t.T + W_noise * dt**0
 
         # Camera transforms for this timestep
         T_imu_world = inversePose(world_T_imu[t])
@@ -479,6 +479,12 @@ def vi_slam_ekf(
         # Update pose covariance and compute correction
         Sigma_T = np.linalg.inv(Omega_T)
         dxi     = Sigma_T @ xi_info                                 # (6,)
+
+        # Ground-plane constraint: zero out z-translation (idx 2) and
+        # roll/pitch corrections (idx 3, 4), keeping only x/y translation
+        # and yaw (idx 0, 1, 5).  Appropriate for ground-vehicle SLAM.
+        ground_mask = np.array([1., 1., 0., 0., 0., 1.])
+        dxi = dxi * ground_mask
 
         # Apply correction:  T̄_t ← T̄_t · exp(δξ̂)
         world_T_imu[t] = world_T_imu[t] @ twist2pose(axangle2twist(dxi))

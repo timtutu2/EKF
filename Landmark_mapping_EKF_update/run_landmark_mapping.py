@@ -1,22 +1,3 @@
-"""
-Landmark Mapping via EKF Update — Runner Script
-================================================
-ECE 276A - Project 3, Part 3
-
-Usage (from the Landmark_mapping_EKF_update/ directory):
-    python run_landmark_mapping.py
-
-Or from the code/ directory:
-    python -m Landmark_mapping_EKF_update.run_landmark_mapping
-
-Outputs (saved next to this script):
-    datasetXX_landmark_map.png   — 2D top-view:  IMU trajectory + landmark map
-    datasetXX_landmark_map.npy   — dict with keys:
-                                      'landmarks'   (M, 3)   world positions
-                                      'Sigma_lm'    (M, 3,3) covariances
-                                      'initialized' (M,)     bool mask
-"""
-
 import os
 import sys
 import time
@@ -199,11 +180,11 @@ def process_dataset(name, data_path):
 
     # --- Save results -------------------------------------------------------
     result_path = os.path.join(BASE_DIR, f'{name}_landmark_map_{EKF_PARAMS["lm_grid"]}.npy')
-    np.save(result_path, {
-        'landmarks':   landmarks,
-        'Sigma_lm':    Sigma_lm,
-        'initialized': initialized,
-    })
+    # np.save(result_path, {
+    #     'landmarks':   landmarks,
+    #     'Sigma_lm':    Sigma_lm,
+    #     'initialized': initialized,
+    # })
     print(f"\n  Saved results : {result_path}")
 
     # --- Visualisation ------------------------------------------------------
