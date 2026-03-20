@@ -46,6 +46,7 @@ from landmark_mapping_ekf import ekf_landmark_mapping
 DATASETS = {
     'dataset00': os.path.join(BASE_DIR, '../../dataset00/dataset00.npy'),
     'dataset01': os.path.join(BASE_DIR, '../../dataset01/dataset01.npy'),
+    'dataset02': os.path.join(BASE_DIR, '../../dataset02/dataset02.npy'),
 }
 
 # IMU process-noise covariance (tuned from Part 1)
@@ -57,6 +58,7 @@ EKF_PARAMS = dict(
     V_noise          = 4.0 * np.eye(4),   # observation noise: σ = 2 px per coord
     sigma_init       = 1.0,               # initial landmark position std dev [m]
     min_observations = 3,                 # min valid stereo obs to include a landmark
+    lm_grid          = (20, 15),          # spatial grid (rows×cols): 1 best track/cell
     max_depth        = 150.0,             # max triangulated depth at init [m]
     min_disparity    = 1.0,               # min stereo disparity at init [px]
     outlier_threshold= 20.0,              # chi-squared gate (4 DOF); None = disable
@@ -196,7 +198,7 @@ def process_dataset(name, data_path):
         print("  WARNING: No landmarks were initialised!")
 
     # --- Save results -------------------------------------------------------
-    result_path = os.path.join(BASE_DIR, f'{name}_landmark_map.npy')
+    result_path = os.path.join(BASE_DIR, f'{name}_landmark_map_{EKF_PARAMS["lm_grid"]}.npy')
     np.save(result_path, {
         'landmarks':   landmarks,
         'Sigma_lm':    Sigma_lm,
@@ -205,7 +207,7 @@ def process_dataset(name, data_path):
     print(f"\n  Saved results : {result_path}")
 
     # --- Visualisation ------------------------------------------------------
-    fig_path = os.path.join(BASE_DIR, f'{name}_landmark_map.png')
+    fig_path = os.path.join(BASE_DIR, f'{name}_landmark_map_{EKF_PARAMS["lm_grid"]}.png')
     fig, ax  = plot_landmark_map(
         world_T_imu, landmarks, initialized, name, fig_path
     )

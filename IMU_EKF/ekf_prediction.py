@@ -144,6 +144,7 @@ if __name__ == '__main__':
     datasets = {
         'dataset00': os.path.join(BASE_DIR, '../../dataset00/dataset00.npy'),
         'dataset01': os.path.join(BASE_DIR, '../../dataset01/dataset01.npy'),
+        'dataset02': os.path.join(BASE_DIR, '../../dataset02/dataset02.npy'),
     }
 
     # Process noise covariance (tuned for good trajectory estimation)

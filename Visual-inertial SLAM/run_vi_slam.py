@@ -19,6 +19,7 @@ Outputs (saved next to this script):
                                    'initialized'  (M,)       bool mask
 """
 
+from configparser import MAX_INTERPOLATION_DEPTH
 import os
 import sys
 import time
@@ -45,6 +46,7 @@ from vi_slam import vi_slam_ekf
 DATASETS = {
     'dataset00': os.path.join(BASE_DIR, '../../dataset00/dataset00.npy'),
     'dataset01': os.path.join(BASE_DIR, '../../dataset01/dataset01.npy'),
+    'dataset02': os.path.join(BASE_DIR, '../../dataset02/dataset02.npy'),
 }
 
 # IMU process-noise covariance  [translational, rotational]
@@ -57,6 +59,7 @@ VI_SLAM_PARAMS = dict(
     V_noise          = 4.0 * np.eye(4),  # stereo obs. noise: σ = 2 px per coord
     sigma_init       = 1.0,              # initial landmark position std dev [m]
     min_observations = 3,                # min stereo obs. to include a landmark
+    lm_grid          = (20, 15),         # spatial grid (rows×cols): 1 best track/cell
     max_depth        = 150.0,            # max DLT triangulation depth [m]
     min_disparity    = 1.0,              # min stereo disparity at init [px]
     outlier_threshold= 20.0,             # chi-squared gate (4 DOF); None = off
@@ -212,7 +215,7 @@ def process_dataset(name: str, data_path: str):
     print(f"  Final VI-SLAM  pos  : x={slam_final[0]:.2f}  y={slam_final[1]:.2f}  z={slam_final[2]:.2f} m")
 
     # --- Save results ------------------------------------------------------
-    result_path = os.path.join(BASE_DIR, f'{name}_vi_slam.npy')
+    result_path = os.path.join(BASE_DIR, f'{name}_vi_slam_{VI_SLAM_PARAMS["lm_grid"]}.npy')
     np.save(result_path, {
         'world_T_imu':  world_T_imu_slam,
         'landmarks':    landmarks,
@@ -223,14 +226,14 @@ def process_dataset(name: str, data_path: str):
 
     # --- Plots -------------------------------------------------------------
     # Main plot: VI-SLAM trajectory + landmark map
-    fig1_path = os.path.join(BASE_DIR, f'{name}_vi_slam.png')
+    fig1_path = os.path.join(BASE_DIR, f'{name}_vi_slam_{VI_SLAM_PARAMS["lm_grid"]}.png')
     fig1, _ = plot_vi_slam_results(
         world_T_imu_slam, world_T_imu_imu,
         landmarks, initialized, name, fig1_path,
     )
 
     # Comparison plot: IMU-only vs VI-SLAM side by side
-    fig2_path = os.path.join(BASE_DIR, f'{name}_trajectory_comparison.png')
+    fig2_path = os.path.join(BASE_DIR, f'{name}_trajectory_comparison_{VI_SLAM_PARAMS["lm_grid"]}.png')
     plot_trajectory_comparison(
         world_T_imu_slam, world_T_imu_imu, name, fig2_path,
     )

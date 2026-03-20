@@ -77,6 +77,7 @@ from Landmark_mapping_EKF_update.landmark_mapping_ekf import (
     triangulate_batch,
     observations_batch,
     jacobians_batch,
+    _grid_subsample,
 )
 
 
@@ -208,6 +209,7 @@ def vi_slam_ekf(
     V_noise: np.ndarray = None,
     sigma_init: float = 1.0,
     min_observations: int = 3,
+    lm_grid: tuple = (20, 15),
     max_depth: float = 150.0,
     min_disparity: float = 1.0,
     outlier_threshold: float = 20.0,
@@ -237,6 +239,8 @@ def vi_slam_ekf(
     V_noise      : (4, 4)  stereo observation noise covariance
     sigma_init   : float   initial landmark position std dev [m]
     min_observations : int min valid stereo obs to include a landmark
+    lm_grid      : (rows, cols) | None  spatial grid for landmark subsampling;
+                                   one best-observed track kept per image cell
     max_depth    : float   max triangulation depth at init [m]
     min_disparity: float   min stereo disparity at init [px]
     outlier_threshold : float  chi-squared gate (4 DOF); None disables
@@ -262,14 +266,20 @@ def vi_slam_ekf(
 
     Sigma0 = sigma_init ** 2 * np.eye(3)
 
-    # ---- Pre-filter landmarks by observation count -----------------------
+    # ---- Pre-filter landmarks: min-observation count + spatial grid ----------
     valid_obs = np.all(features >= 0, axis=0)   # (M, N) — True when all 4 coords ≥ 0
     obs_count = valid_obs.sum(axis=1)            # (M,)
     keep_lm   = obs_count >= min_observations    # (M,)
 
+    # Spatial grid subsampling: one best-observed track per image-space cell.
+    if lm_grid is not None:
+        keep_lm = _grid_subsample(features, valid_obs, obs_count, keep_lm, grid=lm_grid)
+
     if verbose:
         print(f"  Total landmarks             : {M}")
-        print(f"  After min-obs filter (≥{min_observations}) : {keep_lm.sum()}")
+        print(f"  After min-obs filter (≥{min_observations}) : {(obs_count >= min_observations).sum()}")
+        if lm_grid is not None:
+            print(f"  After grid subsampling {lm_grid}  : {keep_lm.sum()}")
 
     # ---- Allocate storage ------------------------------------------------
     world_T_imu = np.zeros((N, 4, 4))

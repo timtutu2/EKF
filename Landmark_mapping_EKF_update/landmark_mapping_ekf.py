@@ -69,6 +69,69 @@ _oTr = np.array([[0., -1.,  0., 0.],
 
 
 # ---------------------------------------------------------------------------
+# Spatial grid subsampling of landmark tracks
+# ---------------------------------------------------------------------------
+
+def _grid_subsample(features, valid_obs, obs_count, keep_lm, grid=(20, 15)):
+    """
+    Spatially subsample landmark tracks using a grid in left-image space.
+
+    The left image is divided into (rows × cols) cells based on each track's
+    mean observed position.  Within each cell, only the track with the most
+    valid observations is retained.  This spreads landmarks across the full
+    field of view — giving better geometric constraints than a naive count
+    cap — while keeping the total number of tracked features manageable.
+
+    Parameters
+    ----------
+    features  : (4, M, N)  stereo pixel observations (features[0/1] = lx/ly)
+    valid_obs : (M, N)     True where all 4 pixel coords are ≥ 0
+    obs_count : (M,)       number of valid observations per track
+    keep_lm   : (M,)       initial eligibility mask (e.g. min-obs filter)
+    grid      : (rows, cols)  grid dimensions in image space
+
+    Returns
+    -------
+    new_keep : (M,) boolean mask — True for the selected (one per cell) tracks
+    """
+    M    = features.shape[1]
+    rows, cols = grid
+
+    # Mean left-image position per track across all valid frames
+    lx_vals = np.where(valid_obs, features[0], np.nan)   # (M, N)
+    ly_vals = np.where(valid_obs, features[1], np.nan)   # (M, N)
+    mean_lx = np.nanmean(lx_vals, axis=1)                # (M,)
+    mean_ly = np.nanmean(ly_vals, axis=1)                # (M,)
+
+    eligible = keep_lm & np.isfinite(mean_lx) & np.isfinite(mean_ly)
+    if not eligible.any():
+        return keep_lm.copy()
+
+    x_min = mean_lx[eligible].min();  x_max = mean_lx[eligible].max()
+    y_min = mean_ly[eligible].min();  y_max = mean_ly[eligible].max()
+
+    col_idx = np.clip(
+        ((mean_lx - x_min) / (x_max - x_min + 1e-9) * cols).astype(int),
+        0, cols - 1,
+    )
+    row_idx = np.clip(
+        ((mean_ly - y_min) / (y_max - y_min + 1e-9) * rows).astype(int),
+        0, rows - 1,
+    )
+    cell_id = row_idx * cols + col_idx   # (M,)
+
+    new_keep = np.zeros(M, dtype=bool)
+    for cell in range(rows * cols):
+        candidates = np.where(eligible & (cell_id == cell))[0]
+        if len(candidates) == 0:
+            continue
+        best = candidates[np.argmax(obs_count[candidates])]
+        new_keep[best] = True
+
+    return new_keep
+
+
+# ---------------------------------------------------------------------------
 # DLT Stereo Triangulation (batch)
 # ---------------------------------------------------------------------------
 
@@ -218,6 +281,7 @@ def ekf_landmark_mapping(
     V_noise=None,
     sigma_init=1.0,
     min_observations=3,
+    lm_grid=(20, 15),
     max_depth=150.0,
     min_disparity=1.0,
     outlier_threshold=20.0,
@@ -247,6 +311,13 @@ def ekf_landmark_mapping(
                                    Σ₀ = sigma_init² · I₃
     min_observations : int          Minimum valid stereo observations required to
                                    include a landmark (coarse quality filter).
+    lm_grid          : (rows, cols) | None
+                                   Grid dimensions for spatial subsampling of
+                                   landmark tracks in left-image space.  One
+                                   track (the most-observed) is kept per cell,
+                                   spreading landmarks across the field of view
+                                   and keeping complexity manageable.
+                                   None disables grid subsampling.
     max_depth        : float        Max allowed initial depth at triangulation [m].
     min_disparity    : float        Min required stereo disparity at init [px].
                                    Filters out very distant (unreliable) landmarks.
@@ -270,15 +341,24 @@ def ekf_landmark_mapping(
     Sigma0 = sigma_init ** 2 * np.eye(3)
 
     # -----------------------------------------------------------------------
-    # Pre-filter landmarks by minimum observation count
+    # Pre-filter landmarks: min-observation count + spatial grid subsampling
     # -----------------------------------------------------------------------
-    valid_obs  = np.all(features >= 0, axis=0)   # (M, N) True when all 4 coords valid
-    obs_count  = valid_obs.sum(axis=1)            # (M,)
-    keep_lm    = obs_count >= min_observations    # (M,)
+    valid_obs = np.all(features >= 0, axis=0)   # (M, N) True when all 4 coords valid
+    obs_count = valid_obs.sum(axis=1)            # (M,)
+    keep_lm   = obs_count >= min_observations    # (M,)
+
+    # Spatial grid subsampling: divide the left image into a (rows × cols) grid
+    # and keep only the best-observed track per cell.  This distributes landmarks
+    # evenly across the field of view — much better geometric coverage than
+    # retaining an arbitrary top-N count.
+    if lm_grid is not None:
+        keep_lm = _grid_subsample(features, valid_obs, obs_count, keep_lm, grid=lm_grid)
 
     if verbose:
         print(f"  Total landmarks             : {M}")
-        print(f"  After min-obs filter (≥{min_observations}) : {keep_lm.sum()}")
+        print(f"  After min-obs filter (≥{min_observations}) : {(obs_count >= min_observations).sum()}")
+        if lm_grid is not None:
+            print(f"  After grid subsampling {lm_grid}  : {keep_lm.sum()}")
 
     # -----------------------------------------------------------------------
     # Allocate per-landmark state

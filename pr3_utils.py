@@ -30,7 +30,12 @@ def load_data(file_name: str):
     v_t = data["v_t"] # linear velocities
     w_t = data["w_t"] # angular velocities
     timestamps = data["timestamps"] # UNIX timestamps
-    features = data["features"] # 4 x num_features x t : pixel coordinates of the visual features
+    print(file_name)
+    if file_name.endswith("dataset02.npy"):
+      print("Loading features from dataset02_features.npy")
+      features = np.load("/home/tim/Desktop/UCSD/ECE276A/PR3/code/Feature_detection_match/dataset02_features.npy", allow_pickle = True).item()["features"]
+    else:
+      features = data["features"] # 4 x num_features x t : pixel coordinates of the visual features
     K_l = data["K_l"] # intrinsic calibration matrix of left camera
     K_r = data["K_r"] # intrinsic calibration matrix of right camera
     extL_T_imu = data["extL_T_imu"] # SE(3): left camera regular frame → IMU frame (_IT_L)
