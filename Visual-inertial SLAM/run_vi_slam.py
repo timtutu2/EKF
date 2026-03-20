@@ -1,24 +1,3 @@
-"""
-Visual-Inertial SLAM — Runner Script
-=====================================
-ECE 276A - Project 3, Part 4
-
-Usage (from the code/ directory):
-    python -m "Visual-inertial SLAM.run_vi_slam"
-
-Or from the Visual-inertial SLAM/ directory:
-    python run_vi_slam.py
-
-Outputs (saved next to this script):
-    datasetXX_vi_slam.png    — 2D top-view: VI-SLAM trajectory + landmark map
-                               (also overlays the pure-IMU trajectory for comparison)
-    datasetXX_vi_slam.npy    — dict with keys:
-                                   'world_T_imu'  (N, 4, 4)  corrected trajectory
-                                   'landmarks'    (M, 3)     landmark positions
-                                   'Sigma_lm'     (M, 3, 3)  landmark covariances
-                                   'initialized'  (M,)       bool mask
-"""
-
 from configparser import MAX_INTERPOLATION_DEPTH
 import os
 import sys

@@ -1,12 +1,3 @@
-"""
-Run feature detection and matching on dataset02.
-
-Outputs
--------
-dataset02_features.npy  — dict with key 'features', shape (4, M, T)
-dataset02_features.png  — visualization of tracks at a few selected frames
-"""
-
 import sys
 import os
 import numpy as np

@@ -1,58 +1,3 @@
-"""
-Landmark Mapping via EKF Update
-================================
-
-Assumes the IMU trajectory from Part 1 (ekf_imu_prediction) is correct (given).
-Estimates the 3D world-frame positions  m_j ∈ R^3  of M visual landmarks observed
-by the stereo camera, using EKF update steps based on the stereo observation model.
-
-Mathematical Background
------------------------
-Landmark State (independent per landmark j):
-    m_j  ∈ R^3      — 3D world-frame position
-    Σ_j  ∈ R^{3×3}  — position covariance
-
-Stereo Observation Model for landmark j at time t:
-    z_{t,j} = h(m_j; T_t) + n_t,    n_t ~ N(0, V)
-
-    where T_t = world_T_imu[t] is the known IMU pose and:
-
-    extL_T_imu (= _IT_L) maps points FROM the left regular camera frame
-    (same orientation as IMU: x=fwd, y=left, z=up) TO the IMU frame.
-    oTr converts from the regular frame to the optical frame (x=right, y=down, z=fwd).
-
-        p_L = oTr @ inv(extL_T_imu) @ inv(T_t) @ [m_j; 1]   (in optical left-cam frame)
-        p_R = oTr @ inv(extR_T_imu) @ inv(T_t) @ [m_j; 1]   (in optical right-cam frame)
-
-        h(m_j; T_t) = [ fu_l · p_L[0]/p_L[2] + cu_l,
-                         fv_l · p_L[1]/p_L[2] + cv_l,
-                         fu_r · p_R[0]/p_R[2] + cu_r,
-                         fv_r · p_R[1]/p_R[2] + cv_r ]
-
-Observation Jacobian  H_j = ∂h/∂m_j  (4×3):
-    Let A_L = oTr @ inv(extL_T_imu) @ T_imu_world,  A_R = oTr @ inv(extR_T_imu) @ T_imu_world
-        p_L = A_L @ [m_j; 1],  p_R = A_R @ [m_j; 1]
-
-    ∂h_L / ∂p_L  (2×4):
-        row 0: [ fu_l/p_L[2],  0,  -fu_l·p_L[0]/p_L[2]²,  0 ]
-        row 1: [ 0,  fv_l/p_L[2],  -fv_l·p_L[1]/p_L[2]²,  0 ]
-
-    ∂p_L / ∂m_j = A_L[:, :3]  (4×3)
-
-    H_j[:2] = (∂h_L/∂p_L) @ A_L[:, :3]   (2×3)
-    H_j[2:] = (∂h_R/∂p_R) @ A_R[:, :3]   (2×3)
-
-EKF Update (vectorized over all observed landmarks K at time t):
-    S     = H Σ H^T + V                   (K×4×4 innovation covariance)
-    K     = Σ H^T S^{-1}                  (K×3×4 Kalman gain)
-    m     ← m + K (z − ĥ)                (K×3)
-    Σ     ← (I−KH) Σ (I−KH)^T + KVK^T   (K×3×3, Joseph form)
-
-Landmark Initialization:
-    On first valid observation at time t, the 3D position is estimated by
-    DLT triangulation (normal-equations form) using the stereo pair.
-"""
-
 import os
 import sys
 import numpy as np
@@ -73,27 +18,6 @@ _oTr = np.array([[0., -1.,  0., 0.],
 # ---------------------------------------------------------------------------
 
 def _grid_subsample(features, valid_obs, obs_count, keep_lm, grid=(20, 15)):
-    """
-    Spatially subsample landmark tracks using a grid in left-image space.
-
-    The left image is divided into (rows × cols) cells based on each track's
-    mean observed position.  Within each cell, only the track with the most
-    valid observations is retained.  This spreads landmarks across the full
-    field of view — giving better geometric constraints than a naive count
-    cap — while keeping the total number of tracked features manageable.
-
-    Parameters
-    ----------
-    features  : (4, M, N)  stereo pixel observations (features[0/1] = lx/ly)
-    valid_obs : (M, N)     True where all 4 pixel coords are ≥ 0
-    obs_count : (M,)       number of valid observations per track
-    keep_lm   : (M,)       initial eligibility mask (e.g. min-obs filter)
-    grid      : (rows, cols)  grid dimensions in image space
-
-    Returns
-    -------
-    new_keep : (M,) boolean mask — True for the selected (one per cell) tracks
-    """
     M    = features.shape[1]
     rows, cols = grid
 
@@ -136,24 +60,6 @@ def _grid_subsample(features, valid_obs, obs_count, keep_lm, grid=(20, 15)):
 # ---------------------------------------------------------------------------
 
 def triangulate_batch(lx, ly, rx, ry, P_L, P_R):
-    """
-    Batch DLT triangulation: find 3D world points from stereo observations.
-
-    The projection equation  λ [u; v; 1] = P @ [m; 1]  yields two linear
-    constraints per camera view.  For left and right cameras this produces
-    a 4×3 linear system  A m = b  that is solved via normal equations A^T A m = A^T b.
-
-    Parameters
-    ----------
-    lx, ly  : (K,) float  left-image pixel coordinates
-    rx, ry  : (K,) float  right-image pixel coordinates
-    P_L     : (3, 4)      left  projection matrix  = K_l @ oTr @ inv(extL_T_imu) @ T_imu_world
-    P_R     : (3, 4)      right projection matrix  = K_r @ oTr @ inv(extR_T_imu) @ T_imu_world
-
-    Returns
-    -------
-    m : (K, 3) world-frame 3D positions
-    """
     # Build the (K, 4, 3) coefficient matrix A (homogeneous 4th col moved to rhs)
     A = np.stack([
         lx[:, None] * P_L[2:3, :3] - P_L[0:1, :3],   # (K, 3)
@@ -185,21 +91,6 @@ def triangulate_batch(lx, ly, rx, ry, P_L, P_R):
 # ---------------------------------------------------------------------------
 
 def observations_batch(m_batch, T_cam_L, T_cam_R, K_l, K_r):
-    """
-    Predicted stereo pixel observations for a batch of landmarks.
-
-    Parameters
-    ----------
-    m_batch  : (K, 3)  landmark world-frame positions
-    T_cam_L  : (4, 4)  world → optical left-camera  transform = oTr @ inv(extL_T_imu) @ T_imu_world
-    T_cam_R  : (4, 4)  world → optical right-camera transform = oTr @ inv(extR_T_imu) @ T_imu_world
-    K_l, K_r : (3, 3)  camera intrinsic matrices
-
-    Returns
-    -------
-    z_hat : (K, 4)  predicted [lx, ly, rx, ry]
-    valid : (K,)    True when landmark is in front of both cameras
-    """
     K   = m_batch.shape[0]
     m_h = np.hstack([m_batch, np.ones((K, 1))])   # (K, 4) homogeneous
 
@@ -223,20 +114,6 @@ def observations_batch(m_batch, T_cam_L, T_cam_R, K_l, K_r):
 # ---------------------------------------------------------------------------
 
 def jacobians_batch(m_batch, T_cam_L, T_cam_R, K_l, K_r):
-    """
-    4×3 Jacobians of the stereo observation w.r.t. landmark world-frame positions.
-
-    Parameters
-    ----------
-    m_batch  : (K, 3)  landmark world-frame positions
-    T_cam_L  : (4, 4)  world → optical left-camera  transform
-    T_cam_R  : (4, 4)  world → optical right-camera transform
-    K_l, K_r : (3, 3)  camera intrinsics
-
-    Returns
-    -------
-    H : (K, 4, 3)  Jacobians  ∂[lx, ly, rx, ry] / ∂m_j
-    """
     K   = m_batch.shape[0]
     m_h = np.hstack([m_batch, np.ones((K, 1))])   # (K, 4)
 
@@ -287,51 +164,6 @@ def ekf_landmark_mapping(
     outlier_threshold=20.0,
     verbose=True,
 ):
-    """
-    EKF landmark mapping with known IMU trajectory.
-
-    No EKF prediction step is needed since landmarks are assumed static and the
-    IMU poses world_T_imu are treated as ground truth.
-
-    Since each landmark is independent (no cross-covariance through the robot pose
-    in pure landmark mapping), the joint EKF update decouples into per-landmark
-    updates — equivalent to maintaining a block-diagonal covariance.
-
-    Parameters
-    ----------
-    world_T_imu      : (N, 4, 4)   SE(3) IMU poses from EKF prediction
-    features         : (4, M, N)   Stereo observations [lx,ly,rx,ry] × M × N
-                                   Invalid observations are set to -1.
-    K_l, K_r         : (3, 3)      Left / right camera intrinsic matrices
-    extL_T_imu       : (4, 4)      SE(3) transform: left camera regular frame → IMU (_IT_L)
-    extR_T_imu       : (4, 4)      SE(3) transform: right camera regular frame → IMU (_IT_R)
-    V_noise          : (4, 4)      Pixel observation noise covariance.
-                                   Default: 4·I₄  (σ = 2 px per coordinate)
-    sigma_init       : float        Initial landmark position std dev [m].
-                                   Σ₀ = sigma_init² · I₃
-    min_observations : int          Minimum valid stereo observations required to
-                                   include a landmark (coarse quality filter).
-    lm_grid          : (rows, cols) | None
-                                   Grid dimensions for spatial subsampling of
-                                   landmark tracks in left-image space.  One
-                                   track (the most-observed) is kept per cell,
-                                   spreading landmarks across the field of view
-                                   and keeping complexity manageable.
-                                   None disables grid subsampling.
-    max_depth        : float        Max allowed initial depth at triangulation [m].
-    min_disparity    : float        Min required stereo disparity at init [px].
-                                   Filters out very distant (unreliable) landmarks.
-    outlier_threshold: float | None Chi-squared threshold (4 DOF) for innovation
-                                   gating.  None disables outlier rejection.
-                                   χ²(4, 0.9999) ≈ 18.5; using 20.0 as default.
-    verbose          : bool         Print per-step progress to stdout.
-
-    Returns
-    -------
-    landmarks   : (M, 3)      Estimated 3D world positions; NaN for uninitialised.
-    Sigma_lm    : (M, 3, 3)   Per-landmark position covariances.
-    initialized : (M,)        Boolean mask: True for successfully initialised lm.
-    """
     N = world_T_imu.shape[0]
     M = features.shape[1]
 

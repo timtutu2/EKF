@@ -1,33 +1,3 @@
-"""
-IMU Localization via EKF Prediction
-
-This module implements an EKF prediction step for IMU localization using
-SE(3) kinematics equations. The robot pose T_t ∈ SE(3) is propagated forward
-using linear velocity v_t and angular velocity ω_t measurements from the IMU.
-
-Mathematical Background
------------------------
-SE(3) Motion Model (continuous-time):
-    Ṫ_t = T_t · û_t
-    where û_t ∈ se(3) is the body-frame twist matrix built from u_t = [v_t; ω_t]
-
-Discrete-time approximation:
-    T_{t+1} = T_t · exp(û_t · Δt)
-
-EKF Prediction using Right Perturbation (ξ on the right):
-    True pose:  T_t = T̄_t · exp(ξ̂_t),  ξ_t ~ N(0, Σ_t)
-    Noisy model: T_{t+1} = T_t · exp((û_t + ŵ_t) · Δt),  w_t ~ N(0, W)
-
-Linearization (first-order BCH) gives:
-    ξ_{t+1} ≈ F_t · ξ_t + w_t
-
-    where F_t = Ad(exp(-û_t · Δt))  [6×6 adjoint Jacobian]
-
-Prediction equations:
-    T̄_{t+1}  = T̄_t · exp(û_t · Δt)            [mean update]
-    Σ_{t+1}   = F_t · Σ_t · F_t^T + W           [covariance update]
-"""
-
 import os
 import sys
 import numpy as np
@@ -54,34 +24,6 @@ def ekf_imu_prediction(v_t: np.ndarray,
                        w_t: np.ndarray,
                        timestamps: np.ndarray,
                        W_noise: np.ndarray = None) -> tuple:
-    """
-    EKF prediction step for IMU localization via SE(3) kinematics.
-
-    At each time step t the IMU provides body-frame measurements:
-        u_t = [v_t; ω_t]  ∈ R^6
-
-    The motion model is:
-        T_{t+1} = T_t · exp(û_t · Δt)
-
-    The EKF propagates the mean and covariance via:
-        T̄_{t+1} = T̄_t · exp(û_t · Δt)
-        Σ_{t+1}  = F_t · Σ_t · F_t^T + W
-        F_t      = Ad(exp(-û_t · Δt))
-
-    Parameters
-    ----------
-    v_t        : (N, 3)  linear velocity measurements in IMU body frame [m/s]
-    w_t        : (N, 3)  angular velocity measurements in IMU body frame [rad/s]
-    timestamps : (N,)    UNIX timestamps [s]
-    W_noise    : (6, 6)  discrete process noise covariance for one time step.
-                         Rows/cols ordered as [v_x, v_y, v_z, ω_x, ω_y, ω_z].
-                         If None, a small default diagonal is used.
-
-    Returns
-    -------
-    world_T_imu : (N, 4, 4)  SE(3) pose of the IMU in the world frame at each t
-    Sigma       : (N, 6, 6)  6×6 covariance matrix at each t
-    """
     N = v_t.shape[0]
 
     # --- Default process noise covariance -----------------------------------

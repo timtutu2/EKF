@@ -1,23 +1,3 @@
-"""
-(a) Stereo matching: detect Shi-Tomasi corners in left image, find
-    correspondences in right image by searching along the epipolar line
-    using normalized cross-correlation (NCC / matchTemplate).  Pure LK is
-    unsuitable for stereo here because it collapses to zero-disparity for
-    the many far-away features in this dataset; exhaustive epipolar-line
-    search is the standard fix and is explicitly allowed by the spec
-    ("Feel free to use any function from OpenCV").
-
-(b) Temporal tracking: track features in left image across time using
-    calcOpticalFlowPyrLK with forward-backward error checking.
-
-Output: features array of shape (4, M, T)
-    Row 0: left  x-pixel (l_x)
-    Row 1: left  y-pixel (l_y)
-    Row 2: right x-pixel (r_x)
-    Row 3: right y-pixel (r_y)
-Missing observations are set to -1 (all four rows).
-"""
-
 import numpy as np
 import cv2
 

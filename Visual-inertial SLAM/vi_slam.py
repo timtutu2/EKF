@@ -1,59 +1,3 @@
-"""
-Visual-Inertial SLAM via EKF
-============================
-ECE 276A - Project 3, Part 4
-
-Combines the IMU EKF prediction (Part 1) with a joint EKF update step that
-simultaneously corrects both the IMU pose T_t ∈ SE(3) and the 3-D landmark
-positions m_j ∈ R^3 using stereo-camera observations.
-
-Mathematical Background
------------------------
-State:
-    T_t  ∈ SE(3)    — IMU pose (mean),  Σ_T  ∈ R^{6×6}  covariance
-    m_j  ∈ R^3      — landmark positions, Σ_j ∈ R^{3×3}
-
-Prediction (same as Part 1):
-    T̄_{t+1}  = T̄_t · exp(û_t · Δt)
-    Σ_T{t+1} = F_t · Σ_T_t · F_t^T + W,   F_t = Ad(exp(-û_t·Δt))
-
-Pose Update (information-filter form, marginalising landmark uncertainty):
-
-    For each observed landmark j, the effective observation noise is:
-        V_eff_j = V + H_m_j · Σ_j · H_m_j^T          (4×4)
-
-    Information accumulation (summed over all K_v valid observations):
-        Ω_T ← Σ_T^{-1} + Σ_j  H_T_j^T · V_eff_j^{-1} · H_T_j
-        b   ← Σ_j  H_T_j^T · V_eff_j^{-1} · innov_j
-
-    Pose correction:
-        Σ_T  ← Ω_T^{-1}
-        δξ   ← Σ_T · b
-        T̄_t  ← T̄_t · exp(δξ̂)
-
-Landmark Update (standard per-landmark EKF, Joseph form; with corrected pose):
-    Same as Part 3 — see landmark_mapping_ekf.py for details.
-
-Pose Jacobian  H_T_j  (4×6):
-    Under right-perturbation  T_t = T̄_t · exp(ξ̂):
-        T_imu_world(ξ) = exp(-ξ̂) · T̄_imu_world
-
-    extL_T_imu (= _IT_L) maps FROM the left regular-camera frame TO the IMU frame.
-    Let oTr be the regular→optical rotation, and let:
-        oT_L = oTr @ inv(extL_T_imu)   (IMU → optical left camera)
-
-    Let q_imu = T̄_imu_world · m_h   (landmark in IMU frame).
-    Then ∂p_L/∂ξ = -oT_L · q⊙   where q⊙ is the 4×6 "odot" operator:
-
-        q⊙ = [[q4,  0,  0,   0,  q3, -q2],
-               [ 0, q4,  0, -q3,   0,  q1],
-               [ 0,  0, q4,  q2, -q1,   0],
-               [ 0,  0,  0,   0,   0,   0]]
-
-    H_T[:2, :] = (∂z_L/∂p_L) · (-oT_L · q⊙)
-    H_T[2:, :] = (∂z_R/∂p_R) · (-oT_R · q⊙)
-"""
-
 import os
 import sys
 import numpy as np
@@ -133,22 +77,6 @@ def pose_jacobians_batch(
     K_l: np.ndarray,
     K_r: np.ndarray,
 ) -> np.ndarray:
-    """
-    4×6 Jacobian of the stereo observation w.r.t. the pose perturbation ξ
-    (right-perturbation: T = T̄ · exp(ξ̂)).
-
-    Parameters
-    ----------
-    m_batch     : (K, 3)  landmark world-frame positions
-    T_imu_world : (4, 4)  current estimate of world → IMU transform
-    extL_T_imu  : (4, 4)  left camera regular frame → IMU  (_IT_L)
-    extR_T_imu  : (4, 4)  right camera regular frame → IMU (_IT_R)
-    K_l, K_r    : (3, 3)  camera intrinsics
-
-    Returns
-    -------
-    H_T : (K, 4, 6)
-    """
     K = m_batch.shape[0]
     m_h = np.hstack([m_batch, np.ones((K, 1))])   # (K, 4)
 
@@ -216,45 +144,6 @@ def vi_slam_ekf(
     max_lm_per_step: int = 200,
     verbose: bool = True,
 ) -> tuple:
-    """
-    Full EKF Visual-Inertial SLAM.
-
-    The algorithm performs at every timestep t:
-    1. **Predict** — propagate IMU pose and covariance using SE(3) kinematics.
-    2. **Initialise** — triangulate newly seen landmarks via DLT stereo.
-    3. **Pose update** — correct pose via information-filter accumulation over
-       all valid observations (landmark uncertainty marginalised into V_eff).
-    4. **Landmark update** — standard per-landmark EKF using the corrected pose
-       (same as Part 3, but using the updated T_cam).
-
-    Parameters
-    ----------
-    v_t, w_t     : (N, 3)  IMU linear / angular velocity [body frame]
-    timestamps   : (N,)    UNIX timestamps [s]
-    features     : (4, M, N)  stereo pixel observations; -1 for missing
-    K_l, K_r     : (3, 3)  camera intrinsics
-    extL_T_imu   : (4, 4)  left camera regular frame → IMU  (_IT_L)
-    extR_T_imu   : (4, 4)  right camera regular frame → IMU (_IT_R)
-    W_noise      : (6, 6)  IMU process noise covariance
-    V_noise      : (4, 4)  stereo observation noise covariance
-    sigma_init   : float   initial landmark position std dev [m]
-    min_observations : int min valid stereo obs to include a landmark
-    lm_grid      : (rows, cols) | None  spatial grid for landmark subsampling;
-                                   one best-observed track kept per image cell
-    max_depth    : float   max triangulation depth at init [m]
-    min_disparity: float   min stereo disparity at init [px]
-    outlier_threshold : float  chi-squared gate (4 DOF); None disables
-    max_lm_per_step   : int    cap on landmarks used per pose-update step
-    verbose      : bool    print progress
-
-    Returns
-    -------
-    world_T_imu : (N, 4, 4)  corrected IMU trajectory
-    Sigma_T     : (6, 6)     final pose covariance
-    landmarks   : (M, 3)     estimated landmark world positions (NaN if uninit)
-    Sigma_lm    : (M, 3, 3)  per-landmark covariances
-    initialized : (M,)       bool mask of successfully initialised landmarks
-    """
     N = timestamps.shape[0]
     M = features.shape[1]
 
